@@ -1,7 +1,10 @@
+using RiskRegister.Infrastructure;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 
@@ -22,3 +25,6 @@ app.MapGet("/api/hello", () =>
 app.Run();
 
 public sealed record HelloResponse(string Message, DateTimeOffset UtcNow);
+
+// Required for WebApplicationFactory<Program> in RiskRegister.Tests.
+public partial class Program;
