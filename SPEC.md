@@ -1,7 +1,7 @@
 ## Risk Register: list and capture
 
 **Type:** Feature
-**Stack:** .NET 8 Web API (C#) + React 19 / TypeScript / Vite
+**Stack:** .NET 9 Web API (C#) + React 19 / TypeScript / Vite
 **Estimate:** 1 point
 
 ### Background

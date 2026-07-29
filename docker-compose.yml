@@ -1,0 +1,36 @@
+# Local development dependencies.
+#
+# Only SQL Server runs here. The API and the frontend are meant to run on the
+# host (`dotnet run` / `npm run dev`) so hot reload and the debugger keep
+# working — containerising them would cost more than it buys during dev.
+#
+# Nothing in the app connects to this database yet; it is here ready for the
+# Risk Register feature. See README.md.
+
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: riskregister-mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env}
+      MSSQL_PID: Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      # -C trusts the server's self-signed certificate, which the image
+      # generates on first boot. Without it sqlcmd refuses to connect.
+      test:
+        [
+          "CMD-SHELL",
+          '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" || exit 1',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  mssql-data:

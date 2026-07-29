@@ -1,0 +1,6 @@
+@RiskRegister.Api_HostAddress = http://localhost:5080
+
+GET {{RiskRegister.Api_HostAddress}}/api/hello
+Accept: application/json
+
+###

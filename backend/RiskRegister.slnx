@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RiskRegister.Api/RiskRegister.Api.csproj" />
+  </Folder>
+</Solution>
