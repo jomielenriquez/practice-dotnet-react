@@ -8,6 +8,21 @@
   --accent-bg: rgba(170, 59, 255, 0.1);
   --accent-border: rgba(170, 59, 255, 0.5);
   --social-bg: rgba(244, 243, 236, 0.5);
+
+  /*
+   * Severity bands, one pair each, mirroring the `Severity` enum. Foregrounds
+   * clear 6:1 against their own tint on white. Medium and High are the closest
+   * hue pair — pushing Medium to a true amber costs too much contrast — but the
+   * badge spells the band out in text, so colour is never the only cue.
+   */
+  --severity-low: #166534;
+  --severity-low-bg: rgba(22, 101, 52, 0.1);
+  --severity-medium: #854d0e;
+  --severity-medium-bg: rgba(133, 77, 14, 0.1);
+  --severity-high: #9a3412;
+  --severity-high-bg: rgba(154, 52, 18, 0.1);
+  --severity-critical: #9f1239;
+  --severity-critical-bg: rgba(159, 18, 57, 0.1);
   --shadow:
     rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
 
@@ -41,6 +56,16 @@
     --accent-bg: rgba(192, 132, 252, 0.15);
     --accent-border: rgba(192, 132, 252, 0.5);
     --social-bg: rgba(47, 48, 58, 0.5);
+
+    /* Same bands, lightened for the dark surface — all clear 8:1 on #16171d. */
+    --severity-low: #86efac;
+    --severity-low-bg: rgba(134, 239, 172, 0.15);
+    --severity-medium: #fde047;
+    --severity-medium-bg: rgba(253, 224, 71, 0.15);
+    --severity-high: #fdba74;
+    --severity-high-bg: rgba(253, 186, 116, 0.15);
+    --severity-critical: #fda4af;
+    --severity-critical-bg: rgba(253, 164, 175, 0.15);
     --shadow:
       rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
   }

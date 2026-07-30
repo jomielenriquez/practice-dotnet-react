@@ -2,14 +2,10 @@
 
 Scaffold for the Risk Register described in [`SPEC.md`](./SPEC.md).
 
-**Current state: the API is complete, the UI is not.** `GET /api/risks` and `POST /api/risks` are
-built and verified against SQL Server, on top of the `dbo.Risks` table, the `Risk` entity and the
-`InitialCreate` migration. The register list and the capture form are not — see
-[Not built yet](#not-built-yet).
-
-> The scaffold endpoint `GET /api/hello` has been removed. **`frontend/src/App.tsx` still fetches
-> it**, so the page currently renders its error state; it is replaced by the register list, which is
-> the next piece of work.
+**Current state: the API is complete and the register list is built.** `GET /api/risks` and
+`POST /api/risks` are built and verified against SQL Server, on top of the `dbo.Risks` table, the
+`Risk` entity and the `InitialCreate` migration. The register list renders at `/risks`. The status
+filter and the capture form are not built — see [Not built yet](#not-built-yet).
 
 | Part | Stack | Location |
 | --- | --- | --- |
@@ -53,8 +49,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. Until the register list lands, the page shows its error state — it still
-calls the removed `/api/hello`.
+Open http://localhost:5173, which redirects to `/risks` and renders the register.
 
 The frontend calls relative paths (`/api/risks`); Vite's dev server proxies `/api` to
 `http://localhost:5080` (see `frontend/vite.config.ts`). Because the browser only ever talks to one
@@ -301,10 +296,14 @@ header comment has the command; it needs `sqlcmd -I`.
 
 ## Not built yet
 
-- The register list and the capture form. **`frontend/src/App.tsx` still calls the removed
-  `/api/hello`** and shows its error state until they land; `HelloResponse` in
-  `frontend/src/api/types.ts` no longer mirrors anything.
-- The `Risk` and `ValidationProblemDetails` interfaces in `frontend/src/api/types.ts`.
+- **The status filter control.** `GET /api/risks?status=` supports it and each card already shows its
+  status; the UI control and the `?status=` request are not wired up.
+- **The capture form.** Nothing posts to `POST /api/risks` from the browser yet. It also needs
+  `apiFetch` to start reading the RFC 7807 body — see below.
+- The `ValidationProblemDetails` interface in `frontend/src/api/types.ts`, and the `apiFetch` change
+  that parses it. `apiFetch` currently throws on a non-2xx **without reading the body**, so the
+  per-field `errors` map is unreachable. The list screen does not need it (no `?status=` request means
+  no 400 path), but the form's "show the error against the field" requirement does.
 - **Any test of `RiskRepository`.** Its ordering happens in SQL, and neither EF InMemory nor SQLite
   can evaluate a persisted computed column — `Score` comes back `0` on both, so a passing test would
   be misleading. Verified manually against the container instead; an integration test against real

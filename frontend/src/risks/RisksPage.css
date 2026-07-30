@@ -1,0 +1,115 @@
+/*
+ * index.css resets `p` but not `ul`, `dl` or `dd`, so the UA defaults —
+ * bullets, list padding, and `dd`'s 40px indent — have to be cleared here.
+ */
+
+.risk-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/*
+ * One class per card drives both the stripe and the badge: the severity class
+ * sets `--sev`/`--sev-tint`, and everything inside inherits them. That is what
+ * lets the TSX map return a single class name.
+ */
+.risk-card {
+  --sev: var(--border);
+  --sev-tint: transparent;
+
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--sev);
+  border-radius: 6px;
+  padding: 16px 20px;
+}
+
+.sev-low {
+  --sev: var(--severity-low);
+  --sev-tint: var(--severity-low-bg);
+}
+.sev-medium {
+  --sev: var(--severity-medium);
+  --sev-tint: var(--severity-medium-bg);
+}
+.sev-high {
+  --sev: var(--severity-high);
+  --sev-tint: var(--severity-high-bg);
+}
+.sev-critical {
+  --sev: var(--severity-critical);
+  --sev-tint: var(--severity-critical-bg);
+}
+
+/*
+ * The band is spelled out in text, so the stripe and tint are a second cue
+ * rather than the only one.
+ */
+.risk-badge {
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--sev);
+  background: var(--sev-tint);
+}
+
+/* Down from index.css's global 24px — a card title is not a page heading. */
+.risk-card h2 {
+  font-size: 20px;
+  letter-spacing: -0.2px;
+}
+
+.risk-description {
+  margin-top: 8px;
+  font-size: 15px;
+  /* A description can be up to 2000 characters; keep long words in the card. */
+  overflow-wrap: break-word;
+}
+
+/*
+ * A grid rather than a wrapping flex row: every card is the same width, so
+ * fixed column proportions line the metrics up down the whole register. With
+ * flex the columns shift card to card as owner names change length, which is
+ * exactly the misalignment that makes a register hard to scan.
+ */
+.risk-meta {
+  margin: 16px 0 0;
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) repeat(4, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+@media (max-width: 560px) {
+  .risk-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.risk-meta dt {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* Long owner names shouldn't widen the first column past its share. */
+.risk-meta dd,
+.risk-meta dt {
+  overflow-wrap: break-word;
+}
+
+.risk-meta dd {
+  /* Clears the UA's 40px indent. */
+  margin-inline-start: 0;
+  margin-top: 2px;
+  font-size: 15px;
+  color: var(--text-h);
+  font-variant-numeric: tabular-nums;
+}

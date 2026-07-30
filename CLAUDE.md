@@ -13,9 +13,12 @@ repository, DTOs, error handling and unit tests, on top of the `dbo.Risks` schem
 `InitialCreate` migration. The scaffold endpoint `GET /api/hello` has been removed and `Program.cs`
 is composition root only.
 
-Still missing: the register list and the capture form. **`frontend/src/App.tsx` still fetches
-`/api/hello`**, so the page renders its error state until those land; `HelloResponse` in
-`frontend/src/api/types.ts` mirrors a record that no longer exists.
+**The register list is built** — `frontend/src/risks/RisksPage.tsx` at `/risks`, with loading, error
+and empty states. `App.tsx` is now the app shell (header, nav, route table) and the dead
+`/api/hello` fetch is gone with it.
+
+Still missing: the **status filter control** and the **capture form**, both of which `SPEC.md` asks
+for. `status` is already rendered per risk, so the filter is additive.
 
 ## Commands
 
@@ -137,9 +140,22 @@ matching interface — `SPEC.md` requires no `any` at the boundary. `frontend/sr
 `fetch`, throws `ApiError` for both network failures and non-2xx responses, and re-throws
 `AbortError` untouched so callers can cancel.
 
-**Request state shape.** `App.tsx` models fetches as a discriminated union
+**Request state shape.** `RisksPage.tsx` models its fetch as a discriminated union
 (`loading | error | success`) rather than nullable fields, with an `AbortController` cleanup in the
-effect. The register list is expected to follow the same pattern.
+effect. The capture form should follow the same pattern.
+
+**`App.tsx` is the app shell, not a page.** It owns the header, the nav and the route table only;
+`<main>` belongs to the routed page, one per document. Screens live in `frontend/src/risks/`.
+
+**The severity band → CSS class map is a `Record<Severity, string>`**, module-local in
+`RisksPage.tsx`. A `` `sev-${severity.toLowerCase()}` `` template would be shorter but would let a
+new backend band render unstyled; the `Record` makes it a build error instead. It is also why
+`Severity` is a string-literal union rather than a loose `string`. The map and the state type stay
+unexported so oxlint's `react/only-export-components` does not fire on a `.tsx` file.
+
+**The list is rendered in the order the API returned it.** Ordering is `Score DESC, CreatedUtc DESC,
+Id DESC`, done in SQL and carried by two covering indexes — sorting again in the client would only
+risk disagreeing with it.
 
 ## Constraints that bite
 
@@ -150,6 +166,18 @@ effect. The register list is expected to follow the same pattern.
   edited by hand after `dotnet new`.
 - **HTTP only in development.** No `UseHttpsRedirection`, no dev certificate — intentional for
   containers/Codespaces. TLS terminates at the proxy in production.
+- **Routing is react-router **v8**, and everything imports from `react-router`.** There is no
+  `react-router-dom` in v8 — that package is frozen at 7.18.2 and installing it gets you a shim a
+  major version behind. `BrowserRouter`, `Routes`, `Route`, `NavLink` and `Navigate` all come from
+  `react-router`; DOM-only APIs live at `react-router/dom`.
+- **A hard reload of `/risks` works because Vite's `appType` defaults to `'spa'`.** The HTML fallback
+  serves `index.html` for unknown paths, and the `/api` proxy middleware runs ahead of it. Setting
+  `appType` to anything else, or deploying behind a proxy with no SPA fallback, 404s every deep link.
+- **`apiFetch` does not read the response body on a failure.** A non-2xx throws `ApiError` carrying
+  only a message and a status, so the RFC 7807 `errors` map is unreachable today. The list screen does
+  not need it; the capture form does, and that is the one place `apiFetch` has to grow. Related: 503
+  is reported as "could not reach the API" because Vite's proxy and `DatabaseExceptionHandler` both
+  use it, and from the browser the two are indistinguishable.
 - **`Risk.Score` is written by SQL Server, never by C#.** It is a persisted computed column, so the
   property has a private setter and EF marks it `ValueGeneratedOnAddOrUpdate`. Assigning to it in
   application code is meaningless, and `INSERT`ing it in raw SQL fails with error 271.
