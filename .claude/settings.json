@@ -1,0 +1,13 @@
+{
+  "enabledMcpjsonServers": ["context7"],
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch",
+      "mcp__context7",
+      "Bash(npm view *)",
+      "Bash(npm outdated *)",
+      "Bash(dotnet list package *)"
+    ]
+  }
+}
