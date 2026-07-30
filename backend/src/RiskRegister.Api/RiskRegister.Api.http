@@ -4,3 +4,41 @@ GET {{RiskRegister.Api_HostAddress}}/api/hello
 Accept: application/json
 
 ###
+
+# The whole register: 200, worst first (Score DESC, CreatedUtc DESC, Id DESC).
+# Empty register is 200 [], never 204.
+GET {{RiskRegister.Api_HostAddress}}/api/risks
+Accept: application/json
+
+###
+
+# Filtered: 200. Valid values are Open, Mitigating, Accepted, Closed.
+GET {{RiskRegister.Api_HostAddress}}/api/risks?status=Open
+Accept: application/json
+
+###
+
+# Casing does not matter — parsing is case-insensitive, but `status` comes back canonical ("Open").
+GET {{RiskRegister.Api_HostAddress}}/api/risks?status=mitigating
+Accept: application/json
+
+###
+
+# Blank means no filter: 200, whole register.
+GET {{RiskRegister.Api_HostAddress}}/api/risks?status=
+Accept: application/json
+
+###
+
+# 400 ValidationProblemDetails — { "errors": { "status": ["..."] } } — not an empty array,
+# which would be indistinguishable from "no matching risks".
+GET {{RiskRegister.Api_HostAddress}}/api/risks?status=Nonsense
+Accept: application/json
+
+###
+
+# Also 400: the query string names a status, it does not carry the enum's storage value.
+GET {{RiskRegister.Api_HostAddress}}/api/risks?status=2
+Accept: application/json
+
+###
