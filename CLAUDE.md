@@ -8,11 +8,14 @@ A scaffold for the **Risk Register** feature specified in [`SPEC.md`](./SPEC.md)
 before changing anything — it is the requirements document, and `README.md` records the decisions
 and open questions taken against it.
 
-**`GET /api/risks` is built** — controller, service, repository, DTO, error handling and unit tests —
-on top of the `dbo.Risks` schema and the `InitialCreate` migration. `GET /api/hello` remains as the
-scaffold check. Still missing: `POST /api/risks` (`RiskService.CreateAsync` and
-`RiskRepository.AddAsync` both throw `NotImplementedException`), the register list and the capture
-form.
+**The API is complete** — `GET /api/risks` and `POST /api/risks`, with controller, service,
+repository, DTOs, error handling and unit tests, on top of the `dbo.Risks` schema and the
+`InitialCreate` migration. The scaffold endpoint `GET /api/hello` has been removed and `Program.cs`
+is composition root only.
+
+Still missing: the register list and the capture form. **`frontend/src/App.tsx` still fetches
+`/api/hello`**, so the page renders its error state until those land; `HelloResponse` in
+`frontend/src/api/types.ts` mirrors a record that no longer exists.
 
 ## Commands
 
@@ -90,12 +93,25 @@ no host and no database. `Infrastructure` holds the `DbContext`, entity configur
 the repository implementations. `Api` holds controllers and DTOs. Nothing points back into `Api`, and
 the service layer never sees a `DbContext`.
 
-The legacy `GET /api/hello` is still a minimal API in `Program.cs`; new endpoints are controllers.
+`Program.cs` maps no endpoints of its own — every endpoint is a controller action.
 
 **Validation shape comes free from `[ApiController]`.** It returns RFC 7807
 `ValidationProblemDetails` — `{ "errors": { "title": ["..."] } }` — which is the field-mappable
-response `SPEC.md` demands, from plain DataAnnotations on the request DTO. No endpoint filter and no
-FluentValidation.
+response `SPEC.md` demands, from plain DataAnnotations on `CreateRiskRequest`. No endpoint filter and
+no FluentValidation. An invalid body never reaches the action method, which is why controller unit
+tests cannot see one and `CreateRiskRequestTests` validates the DTO directly instead.
+
+**Those error keys are camelCase only because `Program.cs` sets `DictionaryKeyPolicy`.**
+`ValidationProblemDetails.Errors` is keyed by CLR property name, so without it a request sent with
+`"title"` comes back complaining about `"Title"` and the frontend's field lookup misses. It is not
+covered by a test — it is a serialisation setting, and the unit tests never serialise.
+
+**`CreateRiskRequest` trims in its `init` accessors, before validation runs.** Trimming afterwards
+would let `"  ab  "` pass the 3-character minimum and then fail `CK_Risks_Title`, turning a 400 into
+a 503. A whitespace-only title trims to empty and is reported as *missing*; a blank `description`
+normalises to `null`. `likelihood`/`impact` bind as `int?` so that "absent" is distinguishable from
+`0` and so `300` is a range error rather than a `byte` overflow during deserialisation; the
+controller narrows to `byte` after validation.
 
 **One error shape across the whole API.** `AddProblemDetails()` + `UseExceptionHandler()` in
 `Program.cs` give unhandled failures an RFC 7807 body matching the validation one.
@@ -179,6 +195,15 @@ Two indexes, `IX_Risks_Score` and `IX_Risks_Status_Score`, both carry the regist
   indexable column; a computed one can never drift from its inputs. `Severity` is a pure function of
   it, so storing it would only add a second place to be wrong.
 - **New risks default to `Open`**, both in the entity initialiser and as a database default.
+  `POST` accepts no `status`, no `score` and no `createdUtc` — all three are the database's, read
+  back off the INSERT's OUTPUT clause, so accepting them would let a caller submit values the API
+  discards.
+- **`POST` returns `Location: /api/risks`**, not `/api/risks/{id}`. There is no GET-by-id endpoint,
+  and a `Location` header that 404s is worse than one that resolves; the created risk is in the body
+  either way.
+- **`RiskService.CreateAsync` re-checks the axis range and the blank title/owner** and throws
+  `ArgumentOutOfRangeException` / `ArgumentException`. A backstop against a programming error
+  elsewhere reaching a CHECK constraint as a 503 — not the validation, which the DTO already did.
 - **Ordering tie-break is `Score DESC, CreatedUtc DESC, Id DESC`.** `SPEC.md` orders by score alone,
   which is non-deterministic — 3×4 and 4×3 both score 12.
 - **The validation error shape is RFC 7807 `ValidationProblemDetails`**, per `[ApiController]`.
@@ -196,9 +221,11 @@ Two indexes, `IX_Risks_Score` and `IX_Risks_Status_Score`, both carry the regist
 
 Two things worth knowing before adding tests here:
 
-- **`FakeRiskRepository.Create` sets `Score` by reflection.** The property has a private setter
-  because SQL Server computes it, so no test can populate it the normal way. The reflection is
-  confined to that one factory rather than loosening the entity for tests.
+- **`FakeRiskRepository` sets `Score` by reflection.** The property has a private setter because SQL
+  Server computes it, so no test can populate it the normal way. The reflection is confined to one
+  private helper rather than loosening the entity for tests. `AddAsync` assigns `Id`, `Score` and
+  `CreatedUtc` for the same reason the real repository gets them from the OUTPUT clause — a fake that
+  left them at zero would let a controller drop them and still pass.
 - **`RiskRepository` itself is not covered.** Its ordering happens in SQL, and neither EF InMemory
   nor SQLite can evaluate a persisted computed column — `Score` comes back `0` on both, so a green
   test would be actively misleading. The `ORDER BY` and computed `Score` are verified manually

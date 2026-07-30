@@ -87,7 +87,7 @@ public class RisksControllerTests
         Assert.Contains("Open, Mitigating, Accepted, Closed", messages.Single());
 
         // A rejected request must not reach the database at all.
-        Assert.Equal(0, repository.CallCount);
+        Assert.Equal(0, repository.GetAllCallCount);
     }
 
     [Fact]
@@ -122,6 +122,109 @@ public class RisksControllerTests
         using var cts = new CancellationTokenSource();
 
         await controller.GetRisks(null, cts.Token);
+
+        Assert.Equal(cts.Token, repository.LastCancellationToken);
+    }
+
+    // --- POST /api/risks -------------------------------------------------------------------
+    //
+    // These call the action directly, so [ApiController]'s automatic 400 never runs: an invalid
+    // body is rejected by MVC before the method is entered. The rules themselves are pinned in
+    // CreateRiskRequestTests, which validates the DTO the same way the framework does.
+
+    private static CreateRiskRequest ValidRequest(int likelihood = 3, int impact = 3) => new()
+    {
+        Title = "Customer database has no tested restore path",
+        Description = "Nightly backups report success; a restore has never been attempted.",
+        Owner = "Priya Raman",
+        Likelihood = likelihood,
+        Impact = impact
+    };
+
+    private static RiskResponse CreatedPayload(ActionResult<RiskResponse> result)
+    {
+        var created = Assert.IsType<CreatedAtActionResult>(result.Result);
+        Assert.Equal(StatusCodes.Status201Created, created.StatusCode);
+        return Assert.IsType<RiskResponse>(created.Value);
+    }
+
+    [Fact]
+    public async Task Create_returns_201_with_the_created_risk()
+    {
+        var repository = new FakeRiskRepository();
+        var controller = ControllerOver(repository);
+
+        var payload = CreatedPayload(await controller.CreateRisk(ValidRequest(), CancellationToken.None));
+
+        Assert.Equal("Customer database has no tested restore path", payload.Title);
+        Assert.Equal("Priya Raman", payload.Owner);
+        Assert.NotEqual(0, payload.Id);
+        Assert.Equal(1, repository.AddCallCount);
+    }
+
+    [Fact]
+    public async Task Create_points_Location_at_the_register()
+    {
+        var controller = ControllerOver(new FakeRiskRepository());
+
+        var result = await controller.CreateRisk(ValidRequest(), CancellationToken.None);
+
+        // Not /api/risks/{id}: there is no GET-by-id endpoint, so a Location header naming one
+        // would 404.
+        var created = Assert.IsType<CreatedAtActionResult>(result.Result);
+        Assert.Equal(nameof(RisksController.GetRisks), created.ActionName);
+    }
+
+    [Theory]
+    [InlineData(3, 3, 9, Severity.Medium)]
+    [InlineData(5, 5, 25, Severity.Critical)]
+    [InlineData(1, 1, 1, Severity.Low)]
+    [InlineData(2, 5, 10, Severity.High)]
+    public async Task Create_returns_the_server_computed_score_and_severity(
+        int likelihood,
+        int impact,
+        int expectedScore,
+        Severity expectedSeverity)
+    {
+        var controller = ControllerOver(new FakeRiskRepository());
+
+        var payload = CreatedPayload(
+            await controller.CreateRisk(ValidRequest(likelihood, impact), CancellationToken.None));
+
+        Assert.Equal(expectedScore, payload.Score);
+        Assert.Equal(expectedSeverity, payload.Severity);
+    }
+
+    [Fact]
+    public async Task Create_starts_a_new_risk_Open()
+    {
+        var controller = ControllerOver(new FakeRiskRepository());
+
+        var payload = CreatedPayload(await controller.CreateRisk(ValidRequest(), CancellationToken.None));
+
+        Assert.Equal(RiskStatus.Open, payload.Status);
+    }
+
+    [Fact]
+    public async Task A_created_risk_appears_in_the_register()
+    {
+        var repository = new FakeRiskRepository();
+        var controller = ControllerOver(repository);
+
+        await controller.CreateRisk(ValidRequest(5, 5), CancellationToken.None);
+        var register = OkPayload(await controller.GetRisks(null, CancellationToken.None));
+
+        Assert.Equal(25, Assert.Single(register).Score);
+    }
+
+    [Fact]
+    public async Task Create_flows_the_cancellation_token_to_the_data_layer()
+    {
+        var repository = new FakeRiskRepository();
+        var controller = ControllerOver(repository);
+        using var cts = new CancellationTokenSource();
+
+        await controller.CreateRisk(ValidRequest(), cts.Token);
 
         Assert.Equal(cts.Token, repository.LastCancellationToken);
     }

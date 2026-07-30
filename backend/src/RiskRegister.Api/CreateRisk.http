@@ -1,0 +1,179 @@
+# POST /api/risks. GET lives in RiskRegister.Api.http.
+#
+# The request body carries title, description, likelihood, impact and owner — nothing else.
+# There is no `status` (new risks are always Open), no `score` (SQL Server computes it) and no
+# `createdUtc` (the database defaults it). Sending one is ignored rather than honoured.
+
+@RiskRegister.Api_HostAddress = http://localhost:5080
+
+# 201 Created. Location is the register, not /api/risks/{id} — there is no GET-by-id endpoint.
+# The body carries the created risk with its server-computed score (4 × 5 = 20) and severity.
+POST {{RiskRegister.Api_HostAddress}}/api/risks
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "Customer database has no tested restore path",
+  "description": "Nightly backups report success; a restore has never been attempted.",
+  "owner": "Priya Raman",
+  "likelihood": 4,
+  "impact": 5
+}
+
+###
+
+# description is optional: omit it and it comes back null.
+POST {{RiskRegister.Api_HostAddress}}/api/risks
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "Shared admin account still in use",
+  "owner": "Marcus Webb",
+  "likelihood": 3,
+  "impact": 3
+}
+
+###
+
+# The three band boundaries SPEC.md calls out. 3 × 3 = 9 Medium.
+POST {{RiskRegister.Api_HostAddress}}/api/risks
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "Score 9 should come back Medium",
+  "owner": "Boundary Check",
+  "likelihood": 3,
+  "impact": 3
+}
+
+###
+
+# 5 × 5 = 25 Critical.
+POST {{RiskRegister.Api_HostAddress}}/api/risks
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "Score 25 should come back Critical",
+  "owner": "Boundary Check",
+  "likelihood": 5,
+  "impact": 5
+}
+
+###
+
+# 1 × 1 = 1 Low.
+POST {{RiskRegister.Api_HostAddress}}/api/risks
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "Score 1 should come back Low",
+  "owner": "Boundary Check",
+  "likelihood": 1,
+  "impact": 1
+}
+
+###
+
+# Whitespace is trimmed before validation, so this stores "Padded title" and "Priya Raman".
+# A blank description normalises to null rather than to an empty string.
+POST {{RiskRegister.Api_HostAddress}}/api/risks
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "   Padded title   ",
+  "description": "   ",
+  "owner": "  Priya Raman  ",
+  "likelihood": 2,
+  "impact": 2
+}
+
+###
+
+# 400 ValidationProblemDetails, every offending field at once, keyed in camelCase so the form can
+# map each message back to its control:
+#   { "errors": { "title": [...], "owner": [...], "likelihood": [...], "impact": [...] } }
+POST {{RiskRegister.Api_HostAddress}}/api/risks
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "ab",
+  "owner": "",
+  "likelihood": 9
+}
+
+###
+
+# 400: a whitespace-only title trims to empty, so it is reported as missing, not as too short.
+POST {{RiskRegister.Api_HostAddress}}/api/risks
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "     ",
+  "owner": "Priya Raman",
+  "likelihood": 3,
+  "impact": 3
+}
+
+###
+
+# 400: description is capped at 2000 characters.
+POST {{RiskRegister.Api_HostAddress}}/api/risks
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "Description is too long",
+  "description": "xxxxxxxxxx REPLACE WITH 2001 CHARACTERS TO SEE THIS FIRE xxxxxxxxxx",
+  "owner": "Priya Raman",
+  "likelihood": 1,
+  "impact": 1
+}
+
+###
+
+# 400, but a different shape: the value cannot be deserialised at all, so the error is keyed by
+# JSON path ("$.likelihood") rather than by field name, and MVC adds a "request" entry for the
+# body parameter it could not bind. Malformed JSON is not the same case as an invalid value.
+POST {{RiskRegister.Api_HostAddress}}/api/risks
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "Likelihood is not a number",
+  "owner": "Priya Raman",
+  "likelihood": "high",
+  "impact": 3
+}
+
+###
+
+# status, score and createdUtc are not part of the contract: this is a valid 201 and every one of
+# the three is ignored — status comes back "Open", score 4, createdUtc the server's clock.
+POST {{RiskRegister.Api_HostAddress}}/api/risks
+Content-Type: application/json
+Accept: application/json
+
+{
+  "title": "Fields outside the contract are ignored",
+  "owner": "Priya Raman",
+  "likelihood": 2,
+  "impact": 2,
+  "status": "Closed",
+  "score": 99,
+  "createdUtc": "1999-01-01T00:00:00+00:00"
+}
+
+###
+
+# Then check the new rows landed at the top of the register.
+GET {{RiskRegister.Api_HostAddress}}/api/risks
+Accept: application/json
+
+###

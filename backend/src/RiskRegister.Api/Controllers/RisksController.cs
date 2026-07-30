@@ -46,4 +46,34 @@ public class RisksController(IRiskService riskService) : ControllerBase
         // empty state against.
         return Ok(risks.Select(RiskResponse.From).ToList());
     }
+
+    /// <summary>
+    /// Adds a risk to the register. New risks start <c>Open</c>; <c>score</c> and <c>severity</c>
+    /// are computed server-side and returned on the created risk.
+    /// </summary>
+    /// <remarks>
+    /// No explicit ModelState check: <c>[ApiController]</c> short-circuits an invalid body into a
+    /// 400 <see cref="ValidationProblemDetails"/> before this method runs, which is why the
+    /// nullable axes can be dereferenced below.
+    /// </remarks>
+    [HttpPost]
+    [ProducesResponseType<RiskResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<RiskResponse>> CreateRisk(
+        [FromBody] CreateRiskRequest request,
+        CancellationToken cancellationToken)
+    {
+        var risk = await _riskService.CreateAsync(
+            request.Title,
+            request.Description,
+            request.Owner,
+            (byte)request.Likelihood!.Value,
+            (byte)request.Impact!.Value,
+            cancellationToken);
+
+        // Location points at the register, not at /api/risks/{id}: there is no GET-by-id endpoint
+        // (SPEC.md does not ask for one), and a Location header that 404s is worse than one that
+        // resolves. The created risk is in the body either way, which is what the frontend uses.
+        return CreatedAtAction(nameof(GetRisks), RiskResponse.From(risk));
+    }
 }

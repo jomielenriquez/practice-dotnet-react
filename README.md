@@ -2,10 +2,14 @@
 
 Scaffold for the Risk Register described in [`SPEC.md`](./SPEC.md).
 
-**Current state: schema and data layer built, no endpoints yet.** `GET /api/hello` still proves the
-stack is wired end to end. The `dbo.Risks` table, the `Risk` entity and the `InitialCreate` migration
-exist and are verified against SQL Server; the endpoints and the UI are not — see
+**Current state: the API is complete, the UI is not.** `GET /api/risks` and `POST /api/risks` are
+built and verified against SQL Server, on top of the `dbo.Risks` table, the `Risk` entity and the
+`InitialCreate` migration. The register list and the capture form are not — see
 [Not built yet](#not-built-yet).
+
+> The scaffold endpoint `GET /api/hello` has been removed. **`frontend/src/App.tsx` still fetches
+> it**, so the page currently renders its error state; it is replaced by the register list, which is
+> the next piece of work.
 
 | Part | Stack | Location |
 | --- | --- | --- |
@@ -49,9 +53,10 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. You should see the greeting fetched from the API.
+Open http://localhost:5173. Until the register list lands, the page shows its error state — it still
+calls the removed `/api/hello`.
 
-The frontend calls the relative path `/api/hello`; Vite's dev server proxies `/api` to
+The frontend calls relative paths (`/api/risks`); Vite's dev server proxies `/api` to
 `http://localhost:5080` (see `frontend/vite.config.ts`). Because the browser only ever talks to one
 origin there is **no CORS configuration anywhere** — which is also how a reverse proxy would work in
 production.
@@ -59,9 +64,16 @@ production.
 To check the API directly:
 
 ```bash
-curl -s http://localhost:5080/api/hello
-# {"message":"Hello from the Risk Register API","utcNow":"2026-07-29T..."}
+curl -s http://localhost:5080/api/risks
+
+curl -s -X POST http://localhost:5080/api/risks \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Backups are never restore-tested","owner":"Priya Raman","likelihood":4,"impact":5}'
+# {"id":13,...,"score":20,"severity":"Critical","status":"Open","createdUtc":"..."}
 ```
+
+`backend/src/RiskRegister.Api/RiskRegister.Api.http` and `CreateRisk.http` hold the same requests as
+editor-runnable files, including every validation failure.
 
 The OpenAPI document is served at http://localhost:5080/openapi/v1.json in Development.
 
@@ -152,7 +164,8 @@ A side benefit: `[ApiController]` returns RFC 7807 `ValidationProblemDetails` �
 field-mappable error shape `SPEC.md` asks for, with no endpoint filter and no FluentValidation, which
 minimal APIs on `net9.0` would have needed.
 
-`GET /api/hello` is still a minimal API in `Program.cs`; it is scaffolding, not part of the feature.
+`Program.cs` is now composition root only — configuration, middleware, `MapControllers()`. Every
+endpoint is a controller action.
 
 **SQL Server in Docker, not a local install.** Reproducible, disposable, and version-pinned per
 repo. The connection string will come from configuration, so pointing at a local or Azure SQL
@@ -199,6 +212,73 @@ too, yielding an undefined enum value that would reach SQL. `RiskStatusParser` r
 input and re-checks `Enum.IsDefined`; the query string names a status, it does not carry the enum's
 storage value.
 
+## `POST /api/risks`
+
+Creates a risk and returns it, scored. The request body is exactly the five fields `SPEC.md` lists:
+
+| Field | Rule |
+| --- | --- |
+| `title` | required, 3–200 characters |
+| `description` | optional, max 2000 characters |
+| `owner` | required, 1–100 characters |
+| `likelihood` | required, integer 1–5 |
+| `impact` | required, integer 1–5 |
+
+| Request | Response |
+| --- | --- |
+| valid body | `201`, the created risk, `Location: /api/risks` |
+| invalid body | `400`, `errors` keyed by field, every offending field at once |
+| unparseable value (`"likelihood": "high"`) | `400`, keyed by JSON path (`$.likelihood`) |
+| database unreachable | `503` `ProblemDetails` |
+
+```jsonc
+// request
+{ "title": "Customer database has no tested restore path",
+  "description": "Nightly backups report success; a restore has never been attempted.",
+  "owner": "Priya Raman", "likelihood": 4, "impact": 5 }
+
+// 201 — score and severity are computed server-side, status starts Open
+{ "id": 13, "title": "Customer database has no tested restore path", "description": "Nightly ...",
+  "owner": "Priya Raman", "likelihood": 4, "impact": 5, "score": 20,
+  "severity": "Critical", "status": "Open", "createdUtc": "2026-07-30T10:16:56.528+00:00" }
+
+// 400 — one round trip reports every field, so the form marks all of them up at once
+{ "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+  "title": "One or more validation errors occurred.", "status": 400,
+  "errors": { "title": ["Title must be between 3 and 200 characters."],
+              "owner": ["Owner is required."],
+              "likelihood": ["Likelihood must be an integer between 1 and 5."] } }
+```
+
+**`status`, `score` and `createdUtc` are not accepted.** New risks are always `Open`; `Score` is a
+persisted computed column and `CreatedUtc` defaults to `SYSUTCDATETIME()`. All three are read back
+off the INSERT's OUTPUT clause, so the response carries the database's values — accepting them on
+the way in would only let a caller submit something the API silently discards.
+
+**Text fields are trimmed before validation, not after.** `"  ab  "` is six characters raw and would
+pass a 3-character minimum, then hit `CK_Risks_Title` and surface as a **503** — an outage-shaped
+response to what is really a 400. Trimming in the DTO's `init` accessor makes validation, the
+response and the stored row agree on one value, and a whitespace-only title becomes empty and is
+reported as *missing* rather than *too short*. A blank `description` normalises to `null`.
+
+**`likelihood` and `impact` bind as `int?`, not `byte`.** A missing value on a non-nullable value
+type binds to `0` and is reported as out of range rather than absent; and `300` overflows a `byte`
+during deserialisation, producing a JSON error instead of the range message. The narrowing to `byte`
+happens in the controller, after validation.
+
+**Validation error keys are camelCase** because `Program.cs` sets `DictionaryKeyPolicy`.
+`ValidationProblemDetails.Errors` is keyed by CLR property name, so without it a body sent with
+`"title"` comes back complaining about `"Title"`, and the frontend's field lookup misses.
+
+**`Location` is the register, not `/api/risks/{id}`.** There is no GET-by-id endpoint — `SPEC.md`
+does not ask for one — and a `Location` header that 404s is worse than one that resolves. The
+created risk is in the body either way, which is what the frontend uses.
+
+The service layer re-checks the axis range and rejects a blank title or owner with
+`ArgumentOutOfRangeException` / `ArgumentException`. That is a backstop, not the validation: the DTO
+has already returned a field-mapped 400. It exists so a programming error elsewhere in the
+application fails loudly instead of arriving at a CHECK constraint as a 503.
+
 ### Sample data
 
 `backend/scripts/seed-risks.sql` loads 12 realistic risks spanning all four severity bands and all
@@ -212,13 +292,18 @@ header comment has the command; it needs `sqlcmd -I`.
   non-writable and `NOT NULL`, ordering and tie-break proven.
 - `GET /api/risks` end to end: controller, `RiskService`, `RiskRepository`, `RiskResponse`,
   `RiskStatusParser`, and RFC 7807 error handling including a 503 for database outages.
-- 54 unit tests: severity boundaries, status parsing, service and controller behaviour.
+- `POST /api/risks` end to end: `CreateRiskRequest` with its DataAnnotations, `RiskService.CreateAsync`,
+  `RiskRepository.AddAsync`, and a 201 carrying the database-computed `score` and derived `severity`.
+  Verified against the real container — trimming, blank-to-null, the field-mapped 400 and the
+  store-generated round trip all confirmed by hand as well as by test.
+- 104 unit tests: severity boundaries, status parsing, request validation, service and controller
+  behaviour.
 
 ## Not built yet
 
-- `POST /api/risks`. `RiskService.CreateAsync` and `RiskRepository.AddAsync` throw
-  `NotImplementedException` — the shape is there, the behaviour is not.
-- The register list and the capture form.
+- The register list and the capture form. **`frontend/src/App.tsx` still calls the removed
+  `/api/hello`** and shows its error state until they land; `HelloResponse` in
+  `frontend/src/api/types.ts` no longer mirrors anything.
 - The `Risk` and `ValidationProblemDetails` interfaces in `frontend/src/api/types.ts`.
 - **Any test of `RiskRepository`.** Its ordering happens in SQL, and neither EF InMemory nor SQLite
   can evaluate a persisted computed column — `Score` comes back `0` on both, so a passing test would
@@ -236,7 +321,8 @@ header comment has the command; it needs `sqlcmd -I`.
 - **Ordering tie-break** — `Score DESC, CreatedUtc DESC, Id DESC`. Score alone is non-deterministic:
   3×4 and 4×3 both score 12. Both indexes carry the full ordering.
 - **Validation error shape** — RFC 7807 `ValidationProblemDetails`, which `[ApiController]` produces
-  from DataAnnotations. Field-mappable by construction; camelCase keys matching the request DTO.
+  from DataAnnotations. Field-mappable by construction; camelCase keys matching the request body,
+  which needs `DictionaryKeyPolicy` set — see [`POST /api/risks`](#post-apirisks).
 - **`createdDate` is server-assigned UTC** — named `CreatedUtc`, defaulted by `SYSUTCDATETIME()`, and
   a CHECK constraint enforces a zero offset rather than trusting callers.
 - **`GET /api/risks?status=Nonsense` returns 400** with that same error shape. Returning `[]` is

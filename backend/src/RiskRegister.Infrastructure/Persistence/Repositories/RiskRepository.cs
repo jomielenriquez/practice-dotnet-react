@@ -35,6 +35,14 @@ public class RiskRepository(RiskRegisterDbContext db) : IRiskRepository
             .ToListAsync(cancellationToken);
     }
 
-    public Task<Risk> AddAsync(Risk risk, CancellationToken cancellationToken) =>
-        throw new NotImplementedException("POST /api/risks is a separate ticket.");
+    public async Task<Risk> AddAsync(Risk risk, CancellationToken cancellationToken)
+    {
+        _db.Risks.Add(risk);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        // No re-query: Id, Score and CreatedUtc are all store-generated, so EF adds them to the
+        // INSERT's OUTPUT clause and writes them back onto this instance. Score in particular
+        // cannot be computed here — the persisted computed column is the only definition of it.
+        return risk;
+    }
 }

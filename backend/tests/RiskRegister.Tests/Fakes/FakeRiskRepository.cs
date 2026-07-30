@@ -23,10 +23,15 @@ public class FakeRiskRepository(params Risk[] risks) : IRiskRepository
     /// <summary>The status passed to the last <see cref="GetAllAsync"/> call.</summary>
     public RiskStatus? LastStatus { get; private set; }
 
-    /// <summary>The token passed to the last <see cref="GetAllAsync"/> call.</summary>
+    /// <summary>The token passed to the last call, whichever method it was.</summary>
     public CancellationToken LastCancellationToken { get; private set; }
 
-    public int CallCount { get; private set; }
+    /// <summary>The risk handed to the last <see cref="AddAsync"/> call.</summary>
+    public Risk? LastAdded { get; private set; }
+
+    public int GetAllCallCount { get; private set; }
+
+    public int AddCallCount { get; private set; }
 
     public Task<IReadOnlyList<Risk>> GetAllAsync(
         RiskStatus? status,
@@ -34,7 +39,7 @@ public class FakeRiskRepository(params Risk[] risks) : IRiskRepository
     {
         LastStatus = status;
         LastCancellationToken = cancellationToken;
-        CallCount++;
+        GetAllCallCount++;
 
         IReadOnlyList<Risk> result = status is null
             ? _risks
@@ -43,8 +48,32 @@ public class FakeRiskRepository(params Risk[] risks) : IRiskRepository
         return Task.FromResult(result);
     }
 
-    public Task<Risk> AddAsync(Risk risk, CancellationToken cancellationToken) =>
-        throw new NotSupportedException("POST is not implemented yet.");
+    /// <summary>
+    /// Stands in for the INSERT, including the three columns the database owns.
+    /// </summary>
+    /// <remarks>
+    /// The real repository gets <c>Id</c>, <c>Score</c> and <c>CreatedUtc</c> back from the INSERT's
+    /// OUTPUT clause; a fake that left them at zero would let a controller drop them and still pass.
+    /// So they are assigned here, <c>Score</c> by the same reflection <see cref="Create"/> uses.
+    /// </remarks>
+    public Task<Risk> AddAsync(Risk risk, CancellationToken cancellationToken)
+    {
+        LastAdded = risk;
+        LastCancellationToken = cancellationToken;
+        AddCallCount++;
+
+        risk.Id = _risks.Count == 0 ? 1 : _risks.Max(existing => existing.Id) + 1;
+        risk.CreatedUtc = CreatedUtcForNewRisks;
+        SetScore(risk, risk.Likelihood * risk.Impact);
+
+        _risks.Add(risk);
+
+        return Task.FromResult(risk);
+    }
+
+    /// <summary>The instant this fake stamps onto inserted risks, standing in for SYSUTCDATETIME().</summary>
+    public static readonly DateTimeOffset CreatedUtcForNewRisks =
+        new(2026, 6, 1, 12, 0, 0, TimeSpan.Zero);
 
     /// <summary>
     /// Builds a <see cref="Risk"/> with a populated <c>Score</c>.
@@ -73,10 +102,13 @@ public class FakeRiskRepository(params Risk[] risks) : IRiskRepository
             CreatedUtc = createdUtc ?? new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
         };
 
-        typeof(Risk)
-            .GetProperty(nameof(Risk.Score), BindingFlags.Public | BindingFlags.Instance)!
-            .SetValue(risk, likelihood * impact);
+        SetScore(risk, likelihood * impact);
 
         return risk;
     }
+
+    private static void SetScore(Risk risk, int score) =>
+        typeof(Risk)
+            .GetProperty(nameof(Risk.Score), BindingFlags.Public | BindingFlags.Instance)!
+            .SetValue(risk, score);
 }

@@ -1,9 +1,6 @@
+# GET /api/risks. POST lives in CreateRisk.http.
+
 @RiskRegister.Api_HostAddress = http://localhost:5080
-
-GET {{RiskRegister.Api_HostAddress}}/api/hello
-Accept: application/json
-
-###
 
 # The whole register: 200, worst first (Score DESC, CreatedUtc DESC, Id DESC).
 # Empty register is 200 [], never 204.
