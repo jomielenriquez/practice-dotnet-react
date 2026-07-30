@@ -8,11 +8,11 @@ A scaffold for the **Risk Register** feature specified in [`SPEC.md`](./SPEC.md)
 before changing anything — it is the requirements document, and `README.md` records the decisions
 and open questions taken against it.
 
-Currently the only endpoint is `GET /api/hello`, which the React app calls to prove the stack is
-wired end to end. The **data layer is built**: `dbo.Risks`, the `Risk` entity and the `InitialCreate`
-migration all exist and are verified against SQL Server. The endpoints (`GET /api/risks`,
-`POST /api/risks`), the service and repository implementations, the register list and the capture
-form do not.
+**`GET /api/risks` is built** — controller, service, repository, DTO, error handling and unit tests —
+on top of the `dbo.Risks` schema and the `InitialCreate` migration. `GET /api/hello` remains as the
+scaffold check. Still missing: `POST /api/risks` (`RiskService.CreateAsync` and
+`RiskRepository.AddAsync` both throw `NotImplementedException`), the register list and the capture
+form.
 
 ## Commands
 
@@ -97,6 +97,24 @@ The legacy `GET /api/hello` is still a minimal API in `Program.cs`; new endpoint
 response `SPEC.md` demands, from plain DataAnnotations on the request DTO. No endpoint filter and no
 FluentValidation.
 
+**One error shape across the whole API.** `AddProblemDetails()` + `UseExceptionHandler()` in
+`Program.cs` give unhandled failures an RFC 7807 body matching the validation one.
+`DatabaseExceptionHandler` maps `SqlException` / `DbUpdateException` / `TimeoutException` to **503**
+("retry later") instead of a generic 500, and logs the real exception while returning none of it —
+connection strings and server names appear in `SqlException` messages.
+
+**Enums are serialised as names.** `Program.cs` registers `JsonStringEnumConverter`, so `status` and
+`severity` cross the wire as `"Open"` / `"Critical"`, not `0` / `3`. The frontend keys its severity
+styling off those names, so removing the converter silently breaks the UI rather than the build.
+
+**Query-string enums are parsed by `RiskStatusParser`, not by the model binder.** Binding
+`RiskStatus?` directly would reject a typo with "The value 'Nonsense' is not valid.", which never
+says what *is* valid. Controllers bind `string?` and call `RiskStatusParser.TryParse`, which is a
+pure function in Core and therefore unit-testable without a host. **`Enum.TryParse` alone is not
+enough** — it returns `true` for `"2"` (→ `Accepted`) and for `"99"` (→ an undefined enum value that
+would reach SQL). The parser rejects non-alphabetic input and re-checks `Enum.IsDefined`;
+`RiskStatusParserTests` pins that behaviour so it does not get "simplified" away.
+
 **The typed API boundary.** `frontend/src/api/types.ts` mirrors the C# response records one-for-one
 in camelCase (ASP.NET Core's default JSON naming policy). When a backend record changes, update the
 matching interface — `SPEC.md` requires no `any` at the boundary. `frontend/src/api/client.ts` wraps
@@ -164,5 +182,25 @@ Two indexes, `IX_Risks_Score` and `IX_Risks_Status_Score`, both carry the regist
 - **Ordering tie-break is `Score DESC, CreatedUtc DESC, Id DESC`.** `SPEC.md` orders by score alone,
   which is non-deterministic — 3×4 and 4×3 both score 12.
 - **The validation error shape is RFC 7807 `ValidationProblemDetails`**, per `[ApiController]`.
-- Remaining unresolved questions from `SPEC.md` (status casing on the query string, whether frontend
-  tests are required) are listed at the end of `README.md`.
+- **`?status=open` is valid** — status parsing is case-insensitive, while stored and returned values
+  stay canonical (`"Open"`). Query strings get hand-typed; rejecting a casing difference gains
+  nothing. `?status=` (blank) means no filter; `?status=2` is a 400, since the query string names a
+  status rather than carrying the enum's storage value.
+- Remaining unresolved questions from `SPEC.md` (whether frontend tests are required) are listed at
+  the end of `README.md`.
+
+## Testing
+
+`backend/tests/RiskRegister.Tests` is **pure unit tests — no database, no `WebApplicationFactory`**.
+`FakeRiskRepository` stands in for EF and records what it was asked for.
+
+Two things worth knowing before adding tests here:
+
+- **`FakeRiskRepository.Create` sets `Score` by reflection.** The property has a private setter
+  because SQL Server computes it, so no test can populate it the normal way. The reflection is
+  confined to that one factory rather than loosening the entity for tests.
+- **`RiskRepository` itself is not covered.** Its ordering happens in SQL, and neither EF InMemory
+  nor SQLite can evaluate a persisted computed column — `Score` comes back `0` on both, so a green
+  test would be actively misleading. The `ORDER BY` and computed `Score` are verified manually
+  against the real container instead (see `backend/scripts/seed-risks.sql`). Closing this properly
+  needs an integration test against SQL Server.

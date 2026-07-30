@@ -165,21 +165,66 @@ container or Codespace and buy nothing locally. TLS terminates at the proxy in p
 template only emits `net10.0`, so the target framework and the `Microsoft.AspNetCore.OpenApi`
 version are pinned by hand in `backend/src/RiskRegister.Api/RiskRegister.Api.csproj`.
 
+## `GET /api/risks`
+
+Returns the register, worst first. Ordering is `Score DESC, CreatedUtc DESC, Id DESC`, matching the
+index key order exactly so the sort comes free.
+
+| Request | Response |
+| --- | --- |
+| `/api/risks` | `200`, every risk |
+| `/api/risks?status=Open`, `?status=open`, `?status=OPEN` | `200`, filtered — casing is ignored |
+| `/api/risks?status=` (blank) | `200`, treated as no filter |
+| `/api/risks?status=Nonsense`, `?status=2` | `400`, `errors.status` names the valid values |
+| empty register | `200` with `[]`, never `204` |
+| database unreachable | `503` `ProblemDetails` |
+
+```jsonc
+// 200
+[{ "id": 1, "title": "Customer database has no tested restore path", "description": "...",
+   "owner": "Priya Raman", "likelihood": 5, "impact": 5, "score": 25,
+   "severity": "Critical", "status": "Open", "createdUtc": "2026-07-01T09:15:00+00:00" }]
+
+// 400 — field-mappable, keyed by the query parameter
+{ "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+  "title": "One or more validation errors occurred.", "status": 400,
+  "errors": { "status": ["'Nonsense' is not a valid status. Valid values are: Open, Mitigating, Accepted, Closed."] } }
+```
+
+`severity` and `status` cross the wire as **names, not numbers** — `Program.cs` registers
+`JsonStringEnumConverter`. Removing it silently breaks the frontend's severity styling.
+
+`?status=2` is rejected deliberately. `Enum.TryParse` accepts it (`2` → `Accepted`) and accepts `99`
+too, yielding an undefined enum value that would reach SQL. `RiskStatusParser` rejects non-alphabetic
+input and re-checks `Enum.IsDefined`; the query string names a status, it does not carry the enum's
+storage value.
+
+### Sample data
+
+`backend/scripts/seed-risks.sql` loads 12 realistic risks spanning all four severity bands and all
+four statuses, including a deliberate score-12 tie (3×4 and 4×3) so the tie-break is visible. The
+header comment has the command; it needs `sqlcmd -I`.
+
 ## Built
 
 - The `dbo.Risks` schema, the `Risk` entity, `RiskScoring`, and the `InitialCreate` migration,
   verified against SQL Server 2022 — every CHECK constraint proven to fire, `Score` proven
   non-writable and `NOT NULL`, ordering and tie-break proven.
-- `RiskRegister.Tests` with the score → severity boundary mapping covered (16 tests).
+- `GET /api/risks` end to end: controller, `RiskService`, `RiskRepository`, `RiskResponse`,
+  `RiskStatusParser`, and RFC 7807 error handling including a 503 for database outages.
+- 54 unit tests: severity boundaries, status parsing, service and controller behaviour.
 
 ## Not built yet
 
-- `GET /api/risks`, `POST /api/risks`, and the `RiskService` / `RiskRepository` implementations
-  behind them — the interfaces exist, the implementations do not.
+- `POST /api/risks`. `RiskService.CreateAsync` and `RiskRepository.AddAsync` throw
+  `NotImplementedException` — the shape is there, the behaviour is not.
 - The register list and the capture form.
 - The `Risk` and `ValidationProblemDetails` interfaces in `frontend/src/api/types.ts`.
-- Any test of a validation failure (the second `SPEC.md` quality criterion). `Program.cs` already
-  ends with `public partial class Program;`, so `WebApplicationFactory<Program>` will work.
+- **Any test of `RiskRepository`.** Its ordering happens in SQL, and neither EF InMemory nor SQLite
+  can evaluate a persisted computed column — `Score` comes back `0` on both, so a passing test would
+  be misleading. Verified manually against the container instead; an integration test against real
+  SQL Server would close it. `Program.cs` already ends with `public partial class Program;`, so
+  `WebApplicationFactory<Program>` will work.
 - No frontend test runner is installed.
 
 ### Questions in `SPEC.md`, settled by the schema
@@ -197,9 +242,11 @@ version are pinned by hand in `backend/src/RiskRegister.Api/RiskRegister.Api.csp
 - **`GET /api/risks?status=Nonsense` returns 400** with that same error shape. Returning `[]` is
   indistinguishable from "no Open risks" and silently hides typos.
 
+- **`?status=open` is valid** — parsing is case-insensitive, responses stay canonical (`"Open"`).
+  Query strings get hand-typed and hand-edited; rejecting a casing difference gains nothing, and a
+  genuine typo still returns 400.
+
 ### Still open
 
-- Is `?status=open` valid, or only `Open`? The stored values are `Open`-cased; whether the query
-  string is parsed case-insensitively is still a decision.
 - No auth, pagination or tenancy mentioned — assumed out of scope.
 - "At least one test" ×2 — unclear whether frontend tests are required at all.
